@@ -41,6 +41,8 @@ for (var i = 0; i < shapes_raw.length; i++) {
   shapes.push(shape);
 }
 
+var cells;
+
 function calcVoronoi(num) {
   var voronoi = new Voronoi();
   var bbox = {xl: 0, xr: 1000, yt: 0, yb: 1000}; 
@@ -49,50 +51,80 @@ function calcVoronoi(num) {
     sites.push({x: Math.random() * 1000, y: Math.random() * 1000});
   }
   var diagram = voronoi.compute(sites, bbox);
-  var data = '';
+  cells = [];
   for (var i = 0; i < diagram.cells.length; i++) {
-    data += drawShape(getSiteVertices(diagram.cells[i]), randomColor())
-    data += '<circle cx="' + diagram.cells[i].site.x + '" cy="' + diagram.cells[i].site.y + '" r="4"/>';
+    cells.push(getCell(diagram.cells[i]));
   }
-
-  console.log(diagram);
-  logo.innerHTML = data;
 }
 
-function getSiteVertices (site) {
+function getCell (site) {
   var verts = [];
   if (site.halfedges.length == 0) return;
   var s = {x: site.site.x, y: site.site.y};
   for (var i = 0; i < site.halfedges.length; i++) {
-    var va = site.halfedges[i].edge.va, vb =  site.halfedges[i].edge.va;
-    verts.push({x: va.x, y: va.y, a: Math.atan(va.y - s.y, va.x - s.x)});
-    verts.push({x: vb.x, y: vb.y, a: Math.atan(vb.y - s.y, vb.x - s.x)});
+    var va = site.halfedges[i].edge.va, vb =  site.halfedges[i].edge.vb;
+    verts.push({x: va.x, y: va.y, a: Math.atan2(va.y - s.y, va.x - s.x)});
+    verts.push({x: vb.x, y: vb.y, a: Math.atan2(vb.y - s.y, vb.x - s.x)});
   }
   verts.sort(function (a, b) { return a.a < b.a ? 1 : (a.a > b.a ? -1 : 0) });
-  return verts;
+  return {center: s, vertices: verts};
 }
+
+function inside(point, vs) {
+    // https://stackoverflow.com/questions/22521982/js-check-if-point-inside-a-polygon
+    // ray-casting algorithm based on
+    // http://www.ecse.rpi.edu/Homepages/wrf/Research/Short_Notes/pnpoly.html
+    var x = point.x, y = point.y;
+
+    var inside = false;
+    for (var i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+        var xi = vs[i].x, yi = vs[i].y;
+        var xj = vs[j].x, yj = vs[j].y;
+
+        var intersect = ((yi > y) != (yj > y))
+            && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+function trimCells() {
+  for (var i = 0; i < cells.length; i++) {
+    var cp = cells[i].center;
+    if (!inside(cp, shapes[0]) && !inside(cp, shapes[1]) && !inside(cp, shapes[2])) {
+      cells.splice(i, 1);
+      i--;
+    }
+  }
+}
+
 
 function randomColor() {
   var hex = '0123456789ABCDEF';
-  var col = '#';
-  for (var i = 0; i < 6; i++) {
-      col += hex[Math.floor(Math.random() * 16)];
-  }
-  return col;
+  var h = hex[Math.floor(Math.random() * 4)];
+  return '#' + h + h + h;
 }
 
 var svg = document.getElementById('svg');
 var logo = document.getElementById('logo');
 var data;
-
-for (var i = 0; i < shapes.length; i++) {
-  data += drawShape(shapes[i]);
-}
-
-logo.innerHTML = data;
-
-
 var zoom = 1;
+
+
+function getCellsSVG(cells) {
+  var data = '';
+  for (var c = 0; c < cells.length; c++) {
+    var cell = cells[c];
+    data += '<path style="stroke:#fff;fill:' + randomColor() + '" d="';
+    data += 'M' + cell.vertices[0].x + ' ' + cell.vertices[0].y;
+    for (var i = 1; i < cell.vertices.length; i ++) {
+      data += ' ' + cell.vertices[i].x + ' ' + cell.vertices[i].y;
+    }
+    data += 'z"/>\n';
+    //data += '<circle cx="' + cell.center.x + '" cy="' + cell.center.y + '" r="3"/>';
+  }
+  return data;
+}
 
 function refreshView() {
   var viewBox = zoom * 1000.0;
@@ -100,19 +132,6 @@ function refreshView() {
   svg.setAttribute('viewBox', '0 0 ' + viewBox + ' ' + viewBox);
   logo.setAttribute('transform', 'translate(' + pan + ' ' + pan + ')')
 }
-
-function drawShape(s, color) {
-  if (!s) return '';
-  var data = '<path style="fill:' + color + '" d="';
-  data += 'M' + s[0].x + ' ' + s[0].y;
-  for (var i = 1; i < s.length; i ++) {
-    data += ' ' + s[i].x + ' ' + s[i].y;
-  }
-  data += 'z"/>\n';
-  return data;
-}
-
-
 
 svg.addEventListener('wheel', function (evt) {
   zoom += evt.deltaY / 20;
@@ -124,7 +143,10 @@ svg.addEventListener('mousemove', function (evt) {
 
 refreshView();
 
-//calcVoronoi(4);
+calcVoronoi(600);
+trimCells();
+logo.innerHTML = getCellsSVG(cells);
+
 </script>      
 </body>
 </html>
