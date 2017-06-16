@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>A-Frame T-Shirt designer</title>
+  <script src="rhill-voronoi-core.min.js"></script>
+  <style>
+    body {
+      background: #ccc;
+      margin: 0;
+    }
+    svg {
+      background: #fff;
+      width: 500px;
+      height: 500px;
+      margin: 0px;
+    }
+    #log {
+      font: 12px monospace;
+    }
+  </style>
+</head>
+<body>
+<svg id="svg">
+  <g id="logo"></g>
+</svg>
+<div id="log"></div>
+<script>
+var shapes_raw = [
+  [0,0, 63.503,121.029, 653.545,121.029, 716.673, 0],
+  [93.979,179.112, 359.403,684.965, 623.250,179.112],
+  [389.869,742.947, 499.837,952.616, 1000,0, 777.789,0]
+];
+//make point objects and flip y
+var shapes = [];
+for (var i = 0; i < shapes_raw.length; i++) {
+  var shape = [];
+  for (var j = 0; j < shapes_raw[i].length; j += 2) {
+    shape.push({ x: shapes_raw[i][j], y: 1000.0 - shapes_raw[i][j + 1]});
+  }
+  shapes.push(shape);
+}
+
+function calcVoronoi(num) {
+  var voronoi = new Voronoi();
+  var bbox = {xl: 0, xr: 1000, yt: 0, yb: 1000}; 
+  var sites = [];
+  for (var i = 0; i < num; i++) {
+    sites.push({x: Math.random() * 1000, y: Math.random() * 1000});
+  }
+  var diagram = voronoi.compute(sites, bbox);
+  var data = '';
+  for (var i = 0; i < diagram.cells.length; i++) {
+    data += drawShape(getSiteVertices(diagram.cells[i]), randomColor())
+    data += '<circle cx="' + diagram.cells[i].site.x + '" cy="' + diagram.cells[i].site.y + '" r="4"/>';
+  }
+
+  console.log(diagram);
+  logo.innerHTML = data;
+}
+
+function getSiteVertices (site) {
+  var verts = [];
+  if (site.halfedges.length == 0) return;
+  var s = {x: site.site.x, y: site.site.y};
+  for (var i = 0; i < site.halfedges.length; i++) {
+    var va = site.halfedges[i].edge.va, vb =  site.halfedges[i].edge.va;
+    verts.push({x: va.x, y: va.y, a: Math.atan(va.y - s.y, va.x - s.x)});
+    verts.push({x: vb.x, y: vb.y, a: Math.atan(vb.y - s.y, vb.x - s.x)});
+  }
+  verts.sort(function (a, b) { return a.a < b.a ? 1 : (a.a > b.a ? -1 : 0) });
+  return verts;
+}
+
+function randomColor() {
+  var hex = '0123456789ABCDEF';
+  var col = '#';
+  for (var i = 0; i < 6; i++) {
+      col += hex[Math.floor(Math.random() * 16)];
+  }
+  return col;
+}
+
+var svg = document.getElementById('svg');
+var logo = document.getElementById('logo');
+var data;
+
+for (var i = 0; i < shapes.length; i++) {
+  data += drawShape(shapes[i]);
+}
+
+logo.innerHTML = data;
+
+
+var zoom = 1;
+
+function refreshView() {
+  var viewBox = zoom * 1000.0;
+  var pan =  (viewBox - 1000) / 2;
+  svg.setAttribute('viewBox', '0 0 ' + viewBox + ' ' + viewBox);
+  logo.setAttribute('transform', 'translate(' + pan + ' ' + pan + ')')
+}
+
+function drawShape(s, color) {
+  if (!s) return '';
+  var data = '<path style="fill:' + color + '" d="';
+  data += 'M' + s[0].x + ' ' + s[0].y;
+  for (var i = 1; i < s.length; i ++) {
+    data += ' ' + s[i].x + ' ' + s[i].y;
+  }
+  data += 'z"/>\n';
+  return data;
+}
+
+
+
+svg.addEventListener('wheel', function (evt) {
+  zoom += evt.deltaY / 20;
+  refreshView();
+});
+svg.addEventListener('mousemove', function (evt) {
+  document.getElementById('log').innerHTML = (evt.clientX*2 |0) + ', ' + (evt.clientY*2|0);
+});
+
+refreshView();
+
+//calcVoronoi(4);
+</script>      
+</body>
+</html>
+
