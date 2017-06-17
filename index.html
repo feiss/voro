@@ -39,7 +39,7 @@ var logo = document.getElementById('logo');
 var data;
 var zoom = 1;
 
-var svgSize = 600;
+var svgSize = 500;
 svg.style.width = svgSize + 'px';
 svg.style.height = svgSize + 'px';
 
@@ -177,48 +177,43 @@ function removeOutsideEdges() {
 }
 
 
-function slideBoundaryEdges (cell, v1, v2, addPoint) {
+function slideBoundaryEdges (cell, v1, v2) {
   // v1 is index of vertex inside, v2 outside
   var p, a = cell.vertices[v1], b = cell.vertices[v2], dist = 1000, shape = cell.flags[v1], lastp;
   while (true) {
     p = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
-    console.log(a,b,p)
     if (lastp) {
       dist = distance(p.x, p.y, lastp.x, lastp.y);
       if (dist < 1) { break; }
     }
-    if (pointInsidePoly(p, shape) !== false) {
+    if (pointInsidePoly(p, shapes[shape]) !== false) {
       lastp = a = p;
     }
     else {
       lastp = b = p;
     }
   }
-  if (addPoint) {
-    cell.vertices.splice(v2, 0, p);
-  }
-  else {
-    cell.vertices[v2].x = p.x;
-    cell.vertices[v2].y = p.y;
-  }
+  return p;
 }
 
 function trimBoundaryCells() {
   cellsTrimmed = deepCopy(cellsOutsideEdgesRemoved);
-  for (var i = 100; i < cellsTrimmed.length; i++) {
+  for (var i = 0; i < cellsTrimmed.length; i++) {
+    var p1, p2;
     var cell = cellsTrimmed[i];
     if (!cell.boundary) continue;
-    slideBoundaryEdges(cell, 0, cell.vertices.length - 1);
-    cual = i;
-    return;
-    /*
+    p1 = slideBoundaryEdges(cell, 0, cell.vertices.length - 1);
     if (cell.flags[cell.flags.length - 2] === false) {
-      slideBoundaryEdges(cell, cell.vertices.length - 3, cell.vertices.length - 2);
+      p2 = slideBoundaryEdges(cell, cell.vertices.length - 3, cell.vertices.length - 2);
+      cell.vertices.splice(cell.vertices.length - 1, 1);
+      cell.vertices.splice(cell.vertices.length - 1, 1);
     }
     else {
-      slideBoundaryEdges(cell, cell.vertices.length - 2, cell.vertices.length - 1);
+      p2 = slideBoundaryEdges(cell, cell.vertices.length - 2, cell.vertices.length - 1);
+      cell.vertices.splice(cell.vertices.length - 1, 1);
     }
-    */
+    cell.vertices.push(p2);
+    cell.vertices.push(p1);
   }
 }
 
@@ -232,7 +227,7 @@ function randomColor() {
 
 function getCellsSVG(cells, drawCenters, drawBoundaries, drawCells) {
   var data = '';
-  for (var c = cual; c < cells.length; c++) {
+  for (var c = 0; c < cells.length; c++) {
     var cell = cells[c];
     var color = randomColor();
     if (drawBoundaries && cell.boundary) { color = '#f68'; }
@@ -245,7 +240,6 @@ function getCellsSVG(cells, drawCenters, drawBoundaries, drawCells) {
       data += 'z"/>\n';
     }
     if (drawCenters) data += '<circle style="fill:#333" cx="' + cell.center.x + '" cy="' + cell.center.y + '" r="2"/>';
-    break;
   }
   return data;
 }
