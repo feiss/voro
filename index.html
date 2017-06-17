@@ -25,9 +25,26 @@
   <g id="logo"></g>
 </svg>
 <div id="log"></div>
+<button onclick="drawStep(0)">Step 1: Shape</button>
+<button onclick="drawStep(1)">Step 2: Random points</button>
+<button onclick="drawStep(2)">Step 3: Voronoi</button>
+<button onclick="drawStep(3)">Step 4: Boundary cells</button>
+<button onclick="drawStep(4)">Step 5: Remove outside edges</button>
+<button onclick="drawStep(5)">Step 6: Trim</button>
 <script>
+
+
+var svg = document.getElementById('svg');
+var logo = document.getElementById('logo');
+var data;
+var zoom = 1;
+
+var svgSize = 600;
+svg.style.width = svgSize + 'px';
+svg.style.height = svgSize + 'px';
+
 var shapes_raw = [
-  [0,0, 63.503,121.029, 653.545,121.029, 716.673, 0],
+  [0.001,0, 63.503,121.029, 653.545,121.029, 716.673, 0],
   [93.979,179.112, 359.403,684.965, 623.250,179.112],
   [389.869,742.947, 499.837,952.616, 1000,0, 777.789,0]
 ];
@@ -41,14 +58,21 @@ for (var i = 0; i < shapes_raw.length; i++) {
   shapes.push(shape);
 }
 
-var cells;
+var cells, cellsOutsideEdgesRemoved, cellsTrimmed;
 
 function calcVoronoi(num) {
   var voronoi = new Voronoi();
-  var bbox = {xl: 0, xr: 1000, yt: 0, yb: 1000}; 
+  var bbox = {xl: 0, xr: 1010, yt: 0, yb: 1010}; 
   var sites = [];
   for (var i = 0; i < num; i++) {
-    sites.push({x: Math.random() * 1000, y: Math.random() * 1000});
+    var inside = false;
+    var p = {x: 0, y: 0};
+    while (!inside) {
+      p.x = Math.random() * 1000;
+      p.y = Math.random() * 1000;
+      inside = pointInsidePoly(p, shapes[0]) || pointInsidePoly(p, shapes[1]) || pointInsidePoly(p, shapes[2]);
+    }
+    sites.push({x: p.x, y: p.y});
   }
   var diagram = voronoi.compute(sites, bbox);
   cells = [];
@@ -67,10 +91,18 @@ function getCell (site) {
     verts.push({x: vb.x, y: vb.y, a: Math.atan2(vb.y - s.y, vb.x - s.x)});
   }
   verts.sort(function (a, b) { return a.a < b.a ? 1 : (a.a > b.a ? -1 : 0) });
-  return {center: s, vertices: verts};
+  //remove duplicates
+  for (var i = 0; i < verts.length; i++) {
+    if (Math.abs(verts[i].a - verts[(i + 1) % verts.length].a) < 0.00001) {
+      verts.splice(i, 1);
+      i--;
+    }
+  }
+  return {center: s, vertices: verts, boundary: false, flags: undefined};
 }
 
-function inside(point, vs) {
+
+function pointInsidePoly(point, vs) {
     // https://stackoverflow.com/questions/22521982/js-check-if-point-inside-a-polygon
     // ray-casting algorithm based on
     // http://www.ecse.rpi.edu/Homepages/wrf/Research/Short_Notes/pnpoly.html
@@ -88,40 +120,146 @@ function inside(point, vs) {
     return inside;
 }
 
-function trimCells() {
-  for (var i = 0; i < cells.length; i++) {
-    var cp = cells[i].center;
-    if (!inside(cp, shapes[0]) && !inside(cp, shapes[1]) && !inside(cp, shapes[2])) {
-      cells.splice(i, 1);
-      i--;
+function pointInsideShapes(point, vs) {
+  for (var i = 0; i < shapes.length; i++) {
+    if (pointInsidePoly(point, shapes[i])) return i;
+  }
+  return false;
+}
+
+function calcBoundaryCells() {
+  for (var c = 0; c < cells.length; c++) {
+    var insidecount = 0;
+    var flags = [];
+    //var previnsideof = -1;
+    for (var v = 0; v < cells[c].vertices.length; v++) {
+      var vert = cells[c].vertices[v];
+      var insideof = pointInsideShapes(vert);
+      flags[v] = insideof;
+      if (insideof !== false) { insidecount ++; }
+    }
+    if (insidecount > 0 && insidecount < cells[c].vertices.length) { 
+      cells[c].boundary = true;
+      cells[c].flags = flags; 
+    }
+  }
+}
+
+function distance(x1, y1, x2, y2) {
+  var dx = x1 - x2;
+  var dy = y1 - y2;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+function deepCopy(obj) {
+  return JSON.parse(JSON.stringify(obj));
+}
+
+
+function removeOutsideEdges() {
+  cellsOutsideEdgesRemoved = deepCopy(cells);
+  for (var i = 0; i < cellsOutsideEdgesRemoved.length; i++) {
+    var cell = cellsOutsideEdgesRemoved[i];
+    if (!cell.boundary) continue;
+
+    // cycle positions
+    var last = cell.flags.length - 1;
+    while (cell.flags[0] === false || cell.flags[last] !== false) {
+      cell.vertices.push(cell.vertices.shift());
+      cell.flags.push(cell.flags.shift());
+    }
+
+    // remove outsiders
+    for (var blast = last - 1; cell.flags[blast - 1] === false; blast --) {
+      cell.vertices.splice(blast, 1);
+      cell.flags.splice(blast, 1);
     }
   }
 }
 
 
+function slideBoundaryEdges (cell, v1, v2, addPoint) {
+  // v1 is index of vertex inside, v2 outside
+  var p, a = cell.vertices[v1], b = cell.vertices[v2], dist = 1000, shape = cell.flags[v1], lastp;
+  while (true) {
+    p = {x: (a.x + b.x) / 2, y: (a.y + b.y) / 2};
+    console.log(a,b,p)
+    if (lastp) {
+      dist = distance(p.x, p.y, lastp.x, lastp.y);
+      if (dist < 1) { break; }
+    }
+    if (pointInsidePoly(p, shape) !== false) {
+      lastp = a = p;
+    }
+    else {
+      lastp = b = p;
+    }
+  }
+  if (addPoint) {
+    cell.vertices.splice(v2, 0, p);
+  }
+  else {
+    cell.vertices[v2].x = p.x;
+    cell.vertices[v2].y = p.y;
+  }
+}
+
+function trimBoundaryCells() {
+  cellsTrimmed = deepCopy(cellsOutsideEdgesRemoved);
+  for (var i = 100; i < cellsTrimmed.length; i++) {
+    var cell = cellsTrimmed[i];
+    if (!cell.boundary) continue;
+    slideBoundaryEdges(cell, 0, cell.vertices.length - 1);
+    cual = i;
+    return;
+    /*
+    if (cell.flags[cell.flags.length - 2] === false) {
+      slideBoundaryEdges(cell, cell.vertices.length - 3, cell.vertices.length - 2);
+    }
+    else {
+      slideBoundaryEdges(cell, cell.vertices.length - 2, cell.vertices.length - 1);
+    }
+    */
+  }
+}
+
 function randomColor() {
   var hex = '0123456789ABCDEF';
-  var h = hex[Math.floor(Math.random() * 4)];
+  return '#fff';
+  var h = hex[2 + Math.floor(Math.random() * 4)];
   return '#' + h + h + h;
 }
 
-var svg = document.getElementById('svg');
-var logo = document.getElementById('logo');
-var data;
-var zoom = 1;
 
-
-function getCellsSVG(cells) {
+function getCellsSVG(cells, drawCenters, drawBoundaries, drawCells) {
   var data = '';
-  for (var c = 0; c < cells.length; c++) {
+  for (var c = cual; c < cells.length; c++) {
     var cell = cells[c];
-    data += '<path style="stroke:#fff;fill:' + randomColor() + '" d="';
-    data += 'M' + cell.vertices[0].x + ' ' + cell.vertices[0].y;
-    for (var i = 1; i < cell.vertices.length; i ++) {
-      data += ' ' + cell.vertices[i].x + ' ' + cell.vertices[i].y;
+    var color = randomColor();
+    if (drawBoundaries && cell.boundary) { color = '#f68'; }
+    if (drawCells) {
+      data += '<path style="stroke:#333;fill:' + color + '" d="';
+      data += 'M' + cell.vertices[0].x + ' ' + cell.vertices[0].y;
+      for (var i = 1; i < cell.vertices.length; i ++) {
+        data += ' ' + cell.vertices[i].x + ' ' + cell.vertices[i].y;
+      }
+      data += 'z"/>\n';
+    }
+    if (drawCenters) data += '<circle style="fill:#333" cx="' + cell.center.x + '" cy="' + cell.center.y + '" r="2"/>';
+    break;
+  }
+  return data;
+}
+
+function getLogoSVG(color) {
+  var data = '';
+  if (color === undefined) color = '#fff';
+  for (var s = 0; s < shapes.length; s++) {
+    data += '<path opacity="0.2" style="fill:' + color + '" d="';
+    data += 'M' + shapes[s][0].x + ' ' + shapes[s][0].y;
+    for (var i = 1; i < shapes[s].length; i++) {
+      data += ' ' + shapes[s][i].x + ' ' + shapes[s][i].y;
     }
     data += 'z"/>\n';
-    //data += '<circle cx="' + cell.center.x + '" cy="' + cell.center.y + '" r="3"/>';
   }
   return data;
 }
@@ -133,19 +271,52 @@ function refreshView() {
   logo.setAttribute('transform', 'translate(' + pan + ' ' + pan + ')')
 }
 
+function drawStep(step) {
+  switch (step) {
+    case 0:
+      logo.innerHTML = getLogoSVG('#000');
+      break;
+    case 1:
+      logo.innerHTML = getCellsSVG(cells, true, false, false) + getLogoSVG('#000');
+      break;
+    case 2:
+      logo.innerHTML = getCellsSVG(cells, true, false, true) + getLogoSVG('#000');
+      break;
+    case 3:
+      logo.innerHTML = getCellsSVG(cells, true, true, true) + getLogoSVG('#000');
+      break;
+    case 4:
+      logo.innerHTML = getCellsSVG(cellsOutsideEdgesRemoved, true, true, true) + getLogoSVG('#000');
+      break;
+    case 5:
+    default:
+      logo.innerHTML = getCellsSVG(cellsTrimmed, true, true, true) + getLogoSVG('#000');
+      break;
+  }
+}
+
+
+
 svg.addEventListener('wheel', function (evt) {
   zoom += evt.deltaY / 20;
+  zoom = Math.min(20, Math.max(0.1, zoom));
   refreshView();
 });
 svg.addEventListener('mousemove', function (evt) {
   document.getElementById('log').innerHTML = (evt.clientX*2 |0) + ', ' + (evt.clientY*2|0);
 });
 
-refreshView();
 
 calcVoronoi(600);
-trimCells();
-logo.innerHTML = getCellsSVG(cells);
+calcBoundaryCells();
+removeOutsideEdges();
+trimBoundaryCells();
+
+drawStep();
+refreshView();
+
+
+
 
 </script>      
 </body>
