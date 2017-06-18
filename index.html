@@ -80,7 +80,7 @@ function calcVoronoi(num) {
     var p = {x: 0, y: 0};
     while (!inside) {
       p.x = random() * 1000;
-      p.y = random() * 1000;
+      p.y = sites.length < num / 2 ? random() * random() * 1000 : random() * 1000;
       inside = pointInsidePoly(p, shapes[0]) || pointInsidePoly(p, shapes[1]) || pointInsidePoly(p, shapes[2]);
     }
     sites.push({x: p.x, y: p.y});
@@ -263,6 +263,18 @@ var TRI_RULES = [
   [0,1,2, ]
 ];
 */
+
+function verticesCenter(vlist) {
+  var c = {x: 0, y: 0};
+  for (var i = 0; i < vlist.length; i++) {
+    c.x += vlist[i].x;
+    c.y += vlist[i].y;
+  };
+  c.x /= vlist.length;
+  c.y /= vlist.length;
+  return c;
+}
+
 function triangulateCell(cell, factor) {
   var pieces = [], vcount = 0;
   var verts = deepCopy(cell.vertices);
@@ -271,16 +283,19 @@ function triangulateCell(cell, factor) {
   var limit = Math.floor(factor * (verts.length - 2));
 
   while (pieces.length < limit) {
-    pieces.push({
+  //while (verts.length > 3){
+    var p = {
       factor: factor,
       vertices: [
         {x: verts[0].x, y: verts[0].y},
         {x: verts[1].x, y: verts[1].y},
         {x: verts[2].x, y: verts[2].y},
-      ]});
+      ]};
+    p.center = verticesCenter(p.vertices);
+    pieces.push(p);
     verts.splice(1,1);
   }
-  if (verts.length > 2) pieces.push({factor: factor, vertices: verts});
+  if (verts.length > 2) pieces.push({factor: factor, vertices: verts, center: verticesCenter(verts)});
   return pieces;
 }
 
@@ -297,11 +312,17 @@ function triangulateCells() {
 }
 
 function jitterCells() {
-  cellsJittered = deepCopy(cellsTriangulated);
+  cellsJittered = deepCopy(cellsTriangulated || cellsTrimmed);
   for (var i = 0; i < cellsJittered.length; i++) {
-    var factor = cellsJittered[i].factor * 100 + cellsJittered[i].factor * random() * 30;
+    var factory = 1 - cellsJittered[i].center.y / 1000;
+    var factorx = (cellsJittered[i].center.x - 500) / 500;
+    factory = factory * factory * factory * 300; // + factory * random() * 30;
+    factorx = factorx * factory / 20; // + factory * random() * 30;
+    cellsJittered[i].center.y -= factory;
+    cellsJittered[i].center.x += factorx;
     for (var v = 0; v < cellsJittered[i].vertices.length; v++) {
-      cellsJittered[i].vertices[v].y -= factor;
+      cellsJittered[i].vertices[v].y -= factory;
+      cellsJittered[i].vertices[v].x += factorx;
     }
   }
 }
@@ -314,14 +335,16 @@ function randomColor() {
 }
 
 
-function getCellsSVG(cells, drawCenters, drawBoundaries, drawCells, forceColor) {
+function getCellsSVG(cells, drawCenters, drawBoundaries, drawCells, forceColor, strokes) {
   var data = '';
+  if (strokes === undefined) strokes = true;
+  var stroke = strokes ? 'stroke:#333;' : '';
   for (var c = 0; c < cells.length; c++) {
     var cell = cells[c];
     var color = forceColor || randomColor();
     if (drawBoundaries && cell.boundary) { color = '#f68'; }
     if (drawCells) {
-      data += '<path style="stroke:#333;fill:' + color + '" d="';
+      data += '<path style="' + stroke + 'fill:' + color + '" d="';
       data += 'M' + cell.vertices[0].x + ' ' + cell.vertices[0].y;
       for (var i = 1; i < cell.vertices.length; i ++) {
         data += ' ' + cell.vertices[i].x + ' ' + cell.vertices[i].y;
@@ -376,15 +399,15 @@ function drawStep(step) {
       logo.innerHTML = getCellsSVG(cellsTrimmed, true, true, true) + getLogoSVG('#000');
       break;
     case 6:
-      logo.innerHTML = getCellsSVG(cellsTriangulated, false, false, true) + getLogoSVG('#000');
+      logo.innerHTML = getCellsSVG(cellsTriangulated, true, false, true) + getLogoSVG('#000');
       break;
     case 7:
-      logo.innerHTML = getCellsSVG(cellsJittered, false, false, true, '#111');
+      logo.innerHTML = getCellsSVG(cellsJittered, true, false, true);
       break;
     case 100:
     default:
       svg.style.background = '#000';
-      logo.innerHTML = getCellsSVG(cellsJittered, false, false, true, '#fff');
+      logo.innerHTML = getCellsSVG(cellsJittered, false, false, true, '#fff', false);
       break;
   }
 }
