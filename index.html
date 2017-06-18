@@ -31,6 +31,9 @@
 <button onclick="drawStep(3)">Step 4: Boundary cells</button>
 <button onclick="drawStep(4)">Step 5: Remove outside edges</button>
 <button onclick="drawStep(5)">Step 6: Trim</button>
+<button onclick="drawStep(6)">Step 7: Triangulate</button>
+<button onclick="drawStep(7)">Step 8: Jitter</button>
+<button onclick="drawStep(100)">Result</button>
 <script>
 
 
@@ -44,7 +47,7 @@ svg.style.width = svgSize + 'px';
 svg.style.height = svgSize + 'px';
 
 var shapes_raw = [
-  [0.001,0, 63.503,121.029, 653.545,121.029, 716.673, 0],
+  [0,0, 63.503,121.029, 653.545,121.029, 716.673, 0],
   [93.979,179.112, 359.403,684.965, 623.250,179.112],
   [389.869,742.947, 499.837,952.616, 1000,0, 777.789,0]
 ];
@@ -58,9 +61,17 @@ for (var i = 0; i < shapes_raw.length; i++) {
   shapes.push(shape);
 }
 
-var cells, cellsOutsideEdgesRemoved, cellsTrimmed;
+var cells, cornerCells, cellsOutsideEdgesRemoved, cellsTrimmed, cellsTriangulated, cellsJittered;
+var seed = Math.random() * 100;
+
+function random() {
+  var x = Math.sin(seed++) * 10000;
+  return x - Math.floor(x);
+}
 
 function calcVoronoi(num) {
+
+
   var voronoi = new Voronoi();
   var bbox = {xl: 0, xr: 1010, yt: 0, yb: 1010}; 
   var sites = [];
@@ -68,8 +79,8 @@ function calcVoronoi(num) {
     var inside = false;
     var p = {x: 0, y: 0};
     while (!inside) {
-      p.x = Math.random() * 1000;
-      p.y = Math.random() * 1000;
+      p.x = random() * 1000;
+      p.y = random() * 1000;
       inside = pointInsidePoly(p, shapes[0]) || pointInsidePoly(p, shapes[1]) || pointInsidePoly(p, shapes[2]);
     }
     sites.push({x: p.x, y: p.y});
@@ -81,6 +92,8 @@ function calcVoronoi(num) {
   }
 }
 
+function sortVerticesByAngle(a, b) { return a.a < b.a ? 1 : (a.a > b.a ? -1 : 0) }
+
 function getCell (site) {
   var verts = [];
   if (site.halfedges.length == 0) return;
@@ -90,7 +103,7 @@ function getCell (site) {
     verts.push({x: va.x, y: va.y, a: Math.atan2(va.y - s.y, va.x - s.x)});
     verts.push({x: vb.x, y: vb.y, a: Math.atan2(vb.y - s.y, vb.x - s.x)});
   }
-  verts.sort(function (a, b) { return a.a < b.a ? 1 : (a.a > b.a ? -1 : 0) });
+  verts.sort(sortVerticesByAngle);
   //remove duplicates
   for (var i = 0; i < verts.length; i++) {
     if (Math.abs(verts[i].a - verts[(i + 1) % verts.length].a) < 0.00001) {
@@ -128,10 +141,19 @@ function pointInsideShapes(point, vs) {
 }
 
 function calcBoundaryCells() {
+  cornerCells = [];
   for (var c = 0; c < cells.length; c++) {
     var insidecount = 0;
     var flags = [];
-    //var previnsideof = -1;
+    // find cells in corners
+    for (var i = 0; i < shapes.length; i++) {
+      for (var s = 0; s < shapes[i].length; s++) {
+        if (pointInsidePoly(shapes[i][s], cells[c].vertices) !== false) {
+          cornerCells.push({cell: c, corner: shapes[i][s]});
+        }
+      }
+    };
+    // calculate outside vertices 
     for (var v = 0; v < cells[c].vertices.length; v++) {
       var vert = cells[c].vertices[v];
       var insideof = pointInsideShapes(vert);
@@ -215,21 +237,88 @@ function trimBoundaryCells() {
     cell.vertices.push(p2);
     cell.vertices.push(p1);
   }
+  // fix corners
+  for (var i = 0; i < cornerCells.length; i++) {
+    var cell = cellsTrimmed[cornerCells[i].cell];
+    var verts = cell.vertices;
+    // append corner to list
+    verts.push(cornerCells[i].corner);
+    // calculate angles
+    for (var v = 0; v < verts.length; v++) {
+      verts[v].a = Math.atan2(verts[v].y - cell.center.y, verts[v].x - cell.center.x)
+    };
+    // sort angles
+    verts.sort(sortVerticesByAngle);
+  };
+}
+/*
+var TRI_RULES = [
+  [0],
+  [0,1],
+  [0,1,2],
+  [0,1,2, 0,2,3],
+  [0,1,2, 0,2,3, 0,3,4],
+  [0,1,2, 0,2,5, 2,3,5, 5,3,4],
+  [0,1,2, 0,2,6, 2,3,6, 5,3,4, 6,3,5],
+  [0,1,2, ]
+];
+*/
+function triangulateCell(cell, factor) {
+  var pieces = [], vcount = 0;
+  var verts = deepCopy(cell.vertices);
+  // sort by x
+  //verts.sort(function (a, b) { return a.x > b.x ? 1 : (a.x < b.x ? -1 : 0); });
+  var limit = Math.floor(factor * (verts.length - 2));
+
+  while (pieces.length < limit) {
+    pieces.push({
+      factor: factor,
+      vertices: [
+        {x: verts[0].x, y: verts[0].y},
+        {x: verts[1].x, y: verts[1].y},
+        {x: verts[2].x, y: verts[2].y},
+      ]});
+    verts.splice(1,1);
+  }
+  if (verts.length > 2) pieces.push({factor: factor, vertices: verts});
+  return pieces;
+}
+
+function triangulateCells() {
+  cellsTriangulated = [];
+  for (var i = 0; i < cellsTrimmed.length; i++) {
+    var cell = cellsTrimmed[i];
+    var factor = Math.min(1, (900.0 - (cell.center.y - 100)) / 900.0);
+    var tris = triangulateCell(cell, factor);
+    for (var p = 0; p < tris.length; p++) {
+      cellsTriangulated.push(tris[p]);
+    };
+  };
+}
+
+function jitterCells() {
+  cellsJittered = deepCopy(cellsTriangulated);
+  for (var i = 0; i < cellsJittered.length; i++) {
+    var factor = cellsJittered[i].factor * 100 + cellsJittered[i].factor * random() * 30;
+    for (var v = 0; v < cellsJittered[i].vertices.length; v++) {
+      cellsJittered[i].vertices[v].y -= factor;
+    }
+  }
 }
 
 function randomColor() {
   var hex = '0123456789ABCDEF';
-  return '#fff';
-  var h = hex[2 + Math.floor(Math.random() * 4)];
+  //return '#fff';
+  var h = hex[10 + Math.floor(Math.random() * 4)];
   return '#' + h + h + h;
 }
 
 
-function getCellsSVG(cells, drawCenters, drawBoundaries, drawCells) {
+function getCellsSVG(cells, drawCenters, drawBoundaries, drawCells, forceColor) {
   var data = '';
   for (var c = 0; c < cells.length; c++) {
     var cell = cells[c];
-    var color = randomColor();
+    var color = forceColor || randomColor();
     if (drawBoundaries && cell.boundary) { color = '#f68'; }
     if (drawCells) {
       data += '<path style="stroke:#333;fill:' + color + '" d="';
@@ -266,6 +355,7 @@ function refreshView() {
 }
 
 function drawStep(step) {
+  svg.style.background = '#fff';
   switch (step) {
     case 0:
       logo.innerHTML = getLogoSVG('#000');
@@ -283,8 +373,18 @@ function drawStep(step) {
       logo.innerHTML = getCellsSVG(cellsOutsideEdgesRemoved, true, true, true) + getLogoSVG('#000');
       break;
     case 5:
-    default:
       logo.innerHTML = getCellsSVG(cellsTrimmed, true, true, true) + getLogoSVG('#000');
+      break;
+    case 6:
+      logo.innerHTML = getCellsSVG(cellsTriangulated, false, false, true) + getLogoSVG('#000');
+      break;
+    case 7:
+      logo.innerHTML = getCellsSVG(cellsJittered, false, false, true, '#111');
+      break;
+    case 100:
+    default:
+      svg.style.background = '#000';
+      logo.innerHTML = getCellsSVG(cellsJittered, false, false, true, '#fff');
       break;
   }
 }
@@ -301,10 +401,12 @@ svg.addEventListener('mousemove', function (evt) {
 });
 
 
-calcVoronoi(600);
+calcVoronoi(100);
 calcBoundaryCells();
 removeOutsideEdges();
 trimBoundaryCells();
+triangulateCells();
+jitterCells();
 
 drawStep();
 refreshView();
