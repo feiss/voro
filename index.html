@@ -34,13 +34,15 @@
 <button onclick="drawStep(6)">Step 7: Triangulate</button>
 <button onclick="drawStep(7)">Step 8: Jitter</button>
 <button onclick="drawStep(100)">Result</button>
+<br>
+<button onclick="getSVG()">Get SVG</button>
 <script>
 
 
 var svg = document.getElementById('svg');
 var logo = document.getElementById('logo');
 var data;
-var zoom = 1;
+var zoom = 1.5;
 
 var svgSize = 500;
 svg.style.width = svgSize + 'px';
@@ -142,6 +144,8 @@ function pointInsideShapes(point, vs) {
 
 function calcBoundaryCells() {
   cornerCells = [];
+  var duples = [];
+  console.log(cells.length);
   for (var c = 0; c < cells.length; c++) {
     var insidecount = 0;
     var flags = [];
@@ -154,17 +158,52 @@ function calcBoundaryCells() {
       }
     };
     // calculate outside vertices 
+    var shape = undefined;
+    var shared = false;
     for (var v = 0; v < cells[c].vertices.length; v++) {
       var vert = cells[c].vertices[v];
       var insideof = pointInsideShapes(vert);
+      if (shape === undefined) {
+        if (insideof !== false) { shape = insideof; }
+      }
+      else if (insideof !== false && insideof !== shape) {
+        shared = true;
+      }
       flags[v] = insideof;
       if (insideof !== false) { insidecount ++; }
     }
+    // flag cell as boundary
     if (insidecount > 0 && insidecount < cells[c].vertices.length) { 
       cells[c].boundary = true;
       cells[c].flags = flags; 
     }
+
+    // if cell is spread between 2 shapes, mark also boundary and duplicate it
+    if (shared) {
+      if (cells[c]['flags'] === undefined) {
+        cells[c].boundary = true;
+        cells[c].flags = flags;
+      }
+      var dup = deepCopy(cells[c]);
+      for (var i = 0; i < flags.length; i++) {
+        if (flags[i] !== false && flags[i] !== shape) {
+          flags[i] = false;
+        }
+      }
+      for (var i = 0; i < dup.flags.length; i++) {
+        if (dup.flags[i] === shape) {
+          dup.flags[i] = false;
+        }
+      }
+      duples.push(dup);
+    }
+
+
   }
+  for (var i = 0; i < duples.length; i++) {
+    cells.push(duples[i]);
+  }
+  console.log(cells.length);
 }
 
 function distance(x1, y1, x2, y2) {
@@ -283,7 +322,7 @@ function triangulateCell(cell, factor) {
   var limit = Math.floor(factor * (verts.length - 2));
 
   while (pieces.length < limit) {
-  //while (verts.length > 3){
+  //while (verts.length > 3){ // triangulate all
     var p = {
       factor: factor,
       vertices: [
@@ -303,7 +342,8 @@ function triangulateCells() {
   cellsTriangulated = [];
   for (var i = 0; i < cellsTrimmed.length; i++) {
     var cell = cellsTrimmed[i];
-    var factor = Math.min(1, (900.0 - (cell.center.y - 100)) / 900.0);
+    // var factor = Math.min(1, (900.0 - (cell.center.y - 100)) / 900.0);
+    var factor = Math.max(0, (1 - cell.center.y / 1000) * 1.5 - 0.3);
     var tris = triangulateCell(cell, factor);
     for (var p = 0; p < tris.length; p++) {
       cellsTriangulated.push(tris[p]);
@@ -314,10 +354,10 @@ function triangulateCells() {
 function jitterCells() {
   cellsJittered = deepCopy(cellsTriangulated || cellsTrimmed);
   for (var i = 0; i < cellsJittered.length; i++) {
-    var factory = 1 - cellsJittered[i].center.y / 1000;
+    var factory = Math.max(0, (1 - cellsJittered[i].center.y / 1000) * 1.5 - 0.6);
     var factorx = (cellsJittered[i].center.x - 500) / 500;
-    factory = factory * factory * factory * 300; // + factory * random() * 30;
-    factorx = factorx * factory / 20; // + factory * random() * 30;
+    factory =  factory * factory * 300; // + factory * random() * 30;
+    factorx = factorx * factory * 0.3; // + factory * random() * 30;
     cellsJittered[i].center.y -= factory;
     cellsJittered[i].center.x += factorx;
     for (var v = 0; v < cellsJittered[i].vertices.length; v++) {
@@ -412,6 +452,12 @@ function drawStep(step) {
   }
 }
 
+function getSVG(evt) {
+  var header = '<svg xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://www.w3.org/2000/svg" height="1000" width="1000" version="1.1" xmlns:cc="http://creativecommons.org/ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" viewBox="0 0 1000 1000"><rect width="1000" height="1000" fill="black"/>';
+  var footer = '</svg>';
+  document.getElementById('log').innerText = header + logo.innerHTML + footer;
+}
+
 
 
 svg.addEventListener('wheel', function (evt) {
@@ -424,11 +470,11 @@ svg.addEventListener('mousemove', function (evt) {
 });
 
 
-calcVoronoi(100);
+calcVoronoi(140);
 calcBoundaryCells();
 removeOutsideEdges();
 trimBoundaryCells();
-triangulateCells();
+//triangulateCells();
 jitterCells();
 
 drawStep();
